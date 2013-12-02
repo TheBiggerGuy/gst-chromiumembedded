@@ -46,6 +46,8 @@
 #ifndef __GST_CHROMIUMEMBEDDED_H__
 #define __GST_CHROMIUMEMBEDDED_H__
 
+#include <stdio.h>
+
 #include <gst/gst.h>
 
 #include <gst/base/gstpushsrc.h>
@@ -77,11 +79,23 @@ struct _GstChromiumEmbedded
   /*< private >*/
 
   /* verbose logging */
-  gboolean silent;
+  gboolean verbose;
+
   /* video state */
   GstVideoInfo info;
-  /* total frames sent */
-  gint64 n_frames;
+
+  gint64 timestamp_offset;              /* base offset */
+
+  /* running time and frames for current caps */
+  GstClockTime running_time;    /* total running time */
+  gint64 n_frames;              /* total frames sent */
+
+  /* previous caps running time and frames */
+  GstClockTime accum_rtime;    /* accumulated running_time */
+  gint64 accum_frames;         /* accumulated frames */
+
+  /* test file */
+  FILE *fp;
 };
 
 struct _GstChromiumEmbeddedClass 

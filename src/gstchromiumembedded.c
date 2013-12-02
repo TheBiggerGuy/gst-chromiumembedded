@@ -51,7 +51,7 @@
  * <refsect2>
  * <title>Example launch line</title>
  * |[
- * gst-launch -v -m fakesrc ! chromiumembedded ! fakesink silent=TRUE
+ * gst-launch -v -m chromiumembedded verbose=true ! fakesink
  * ]|
  * </refsect2>
  */
@@ -59,6 +59,10 @@
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
 #endif
+
+#include <string.h>
+#include <stdint.h>
+#include <glib.h>
 
 #include "gstchromiumembedded.h"
 
@@ -77,17 +81,11 @@ enum
 enum
 {
   PROP_0,
-  PROP_SILENT
+  PROP_VERBOSE
 };
 
 /* the capabilities of the inputs and outputs. */
-#define VTS_VIDEO_CAPS GST_VIDEO_CAPS_MAKE (GST_VIDEO_FORMATS_ALL) ";" \
-  "video/x-raw, format=(string) { bgra }, "                            \
-  "width = " GST_VIDEO_SIZE_RANGE ", "                                 \
-  "height = " GST_VIDEO_SIZE_RANGE ", "                                \
-  "framerate = " GST_VIDEO_FPS_RANGE
-
-/* Fix sublime syntax " */
+#define VTS_VIDEO_CAPS GST_VIDEO_CAPS_MAKE ("BGRA")
 
 static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
@@ -105,8 +103,7 @@ static void gst_chromium_embedded_get_property (GObject * object, guint prop_id,
 
 static gboolean gst_chromium_embedded_setcaps (GstBaseSrc * bsrc, GstCaps * caps);
 static GstCaps *gst_chromium_embedded_src_fixate (GstBaseSrc * parent, GstCaps * caps);
-static gboolean gst_chromium_embedded_start (GstBaseSrc * parent);
-static gboolean gst_chromium_embedded_stop (GstBaseSrc * parent);
+static gboolean gst_chromium_embedded_is_seekable (GstBaseSrc * psrc);
 
 static GstFlowReturn gst_chromium_embedded_fill (GstPushSrc * psrc, GstBuffer * buffer);
 
@@ -134,8 +131,8 @@ gst_chromium_embedded_class_init (GstChromiumEmbeddedClass * klass)
   gobject_class->set_property = gst_chromium_embedded_set_property;
   gobject_class->get_property = gst_chromium_embedded_get_property;
 
-  g_object_class_install_property (gobject_class, PROP_SILENT,
-      g_param_spec_boolean ("silent", "Silent", "Produce verbose output ?",
+  g_object_class_install_property (gobject_class, PROP_VERBOSE,
+      g_param_spec_boolean ("verbose", "Verbose", "Produce verbose output",
           FALSE, G_PARAM_READWRITE));
 
   gst_element_class_set_details_simple(gstelement_class,
@@ -149,8 +146,7 @@ gst_chromium_embedded_class_init (GstChromiumEmbeddedClass * klass)
 
   gstbasesrc_class->set_caps = gst_chromium_embedded_setcaps;
   gstbasesrc_class->fixate = gst_chromium_embedded_src_fixate;
-  gstbasesrc_class->start = gst_chromium_embedded_start;
-  gstbasesrc_class->start = gst_chromium_embedded_stop;
+  gstbasesrc_class->is_seekable = gst_chromium_embedded_is_seekable;
 
   gstpushsrc_class->fill = gst_chromium_embedded_fill;
 }
@@ -166,7 +162,7 @@ static void
 gst_chromium_embedded_init (GstChromiumEmbedded * src)
 {
   /* custom props */
-  src->silent = FALSE;
+  src->verbose = TRUE;
 
   /* we operate in time */
   gst_base_src_set_format (GST_BASE_SRC (src), GST_FORMAT_TIME);
@@ -184,7 +180,7 @@ gst_chromium_embedded_src_fixate (GstBaseSrc * bsrc, GstCaps * caps)
 
   gst_structure_fixate_field_nearest_int (structure, "width", 320);
   gst_structure_fixate_field_nearest_int (structure, "height", 240);
-  gst_structure_fixate_field_nearest_fraction (structure, "framerate", 30, 1);
+  gst_structure_fixate_field_nearest_fraction (structure, "framerate", 25, 1);
 
   caps = GST_BASE_SRC_CLASS (parent_class)->fixate (bsrc, caps);
 
@@ -195,11 +191,11 @@ static void
 gst_chromium_embedded_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
-  GstChromiumEmbedded *filter = GST_CHROMIUMEMBEDDED (object);
+  GstChromiumEmbedded *src = GST_CHROMIUMEMBEDDED (object);
 
   switch (prop_id) {
-    case PROP_SILENT:
-      filter->silent = g_value_get_boolean (value);
+    case PROP_VERBOSE:
+      src->verbose = g_value_get_boolean (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -211,48 +207,15 @@ static void
 gst_chromium_embedded_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec)
 {
-  GstChromiumEmbedded *filter = GST_CHROMIUMEMBEDDED (object);
+  GstChromiumEmbedded *src = GST_CHROMIUMEMBEDDED (object);
 
   switch (prop_id) {
-    case PROP_SILENT:
-      g_value_set_boolean (value, filter->silent);
+    case PROP_VERBOSE:
+      g_value_set_boolean (value, src->verbose);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
-  }
-}
-
-static gboolean
-gst_chromium_embedded_parse_caps (const GstCaps * caps,
-    gint * width, gint * height, gint * fps_n, gint * fps_d,
-    GstVideoColorimetry * colorimetry, gint * x_inv, gint * y_inv)
-{
-  const GstStructure *structure;
-  GstPadLinkReturn ret;
-  const GValue *framerate;
-
-  GST_DEBUG ("parsing caps");
-
-  structure = gst_caps_get_structure (caps, 0);
-
-  ret = gst_structure_get_int (structure, "width", width);
-  ret &= gst_structure_get_int (structure, "height", height);
-  framerate = gst_structure_get_value (structure, "framerate");
-
-  if (framerate) {
-    *fps_n = gst_value_get_fraction_numerator (framerate);
-    *fps_d = gst_value_get_fraction_denominator (framerate);
-  } else
-    goto no_framerate;
-
-  return ret;
-
-  /* ERRORS */
-no_framerate:
-  {
-    GST_DEBUG ("chromiumembedded no framerate given");
-    return FALSE;
   }
 }
 
@@ -289,6 +252,13 @@ parse_failed:
   }
 }
 
+static gboolean
+gst_chromium_embedded_is_seekable (GstBaseSrc * psrc)
+{
+  /* we're are NOT seekable... */
+  return FALSE;
+}
+
 /* chain function
  * this function does the actual processing
  */
@@ -296,10 +266,24 @@ static GstFlowReturn
 gst_chromium_embedded_fill (GstPushSrc * psrc, GstBuffer * buffer)
 {
   GstChromiumEmbedded *src;
+  GstClockTime next_time;
+  GstVideoFrame frameReal;
+  GstVideoFrame* frame;
+  GstVideoInfo *info;
+  gconstpointer pal;
+  gsize palsize;
+  guint h;
+  guint w;
+  guint d;
+  guint n;
+  GstVideoFormatPack pack;
+  uint8_t *buf;
 
   src = GST_CHROMIUMEMBEDDED (psrc);
 
- if (G_UNLIKELY (GST_VIDEO_INFO_FORMAT (&src->info) ==
+  //if (src->verbose) g_print ("gst_chromium_embedded_fill\n");
+
+  if (G_UNLIKELY (GST_VIDEO_INFO_FORMAT (&src->info) ==
           GST_VIDEO_FORMAT_UNKNOWN))
     goto not_negotiated;
 
@@ -307,19 +291,81 @@ gst_chromium_embedded_fill (GstPushSrc * psrc, GstBuffer * buffer)
   if (G_UNLIKELY (src->info.fps_n == 0 && src->n_frames == 1))
     goto eos;
 
-  if (G_UNLIKELY (src->n_frames == -1)) {
-    /* EOS for reverse playback */
+  // temp
+  if (src->fp == NULL)
+    src->fp = fopen("/home/guy/Code/git/video-test/video/big_buck_bunny.bgra_320x240_25fps.raw", "rb");
+
+  if (src->fp == NULL)
+    if (src->verbose) g_print ("!!\n");
+
+  if (src->fp != NULL && feof(src->fp)) {
+    /* EOS when file error or file eof */
     goto eos;
   }
 
+  GST_LOG_OBJECT (src,
+       "creating buffer from pool for frame %d", (gint) src->n_frames);
 
-  if (src->silent == FALSE)
-    g_print ("Not finished yet so EOS\n");
+  if (!gst_video_frame_map (&frameReal, &src->info, buffer, GST_MAP_WRITE))
+    goto invalid_frame;
+  frame = &frameReal;
 
-  return GST_FLOW_EOS;
+  GST_BUFFER_DTS (buffer) = src->accum_rtime + src->timestamp_offset + src->running_time;
+  GST_BUFFER_PTS (buffer) = GST_BUFFER_DTS (buffer);
+
+  gst_object_sync_values (GST_OBJECT (psrc), GST_BUFFER_DTS (buffer));
+
+  info = &frame->info;
+  w = GST_VIDEO_INFO_WIDTH(info);
+  h = GST_VIDEO_INFO_HEIGHT(info);
+  n = GST_VIDEO_INFO_N_COMPONENTS(info);
+  d = GST_VIDEO_FORMAT_INFO_DEPTH (gst_video_format_get_info (info->finfo->unpack_format), 0) / 8;
+  pack = info->finfo->pack_func;
+
+  buf = g_malloc(w * h * n * d);
+  if (fread(buf, 1, w * h * n * d, src->fp) != w * h * n * d) {
+    if (src->verbose) g_print ("failed to read");
+  }
+  pack(info->finfo, GST_VIDEO_PACK_FLAG_NONE,
+    buf, 0,
+    frame->data, (*info).stride, (*info).chroma_site,
+    0, w * h);
+  g_free (buf);
+
+  if ((pal = gst_video_format_get_palette (GST_VIDEO_FRAME_FORMAT (frame),
+              &palsize))) {
+    memcpy (GST_VIDEO_FRAME_PLANE_DATA (frame, 1), pal, palsize);
+  }
+
+  gst_video_frame_unmap (frame);
+
+  GST_DEBUG_OBJECT (src, "Timestamp: %" GST_TIME_FORMAT " = accumulated %"
+      GST_TIME_FORMAT " + offset: %"
+      GST_TIME_FORMAT " + running time: %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (GST_BUFFER_PTS (buffer)), GST_TIME_ARGS (src->accum_rtime),
+      GST_TIME_ARGS (src->timestamp_offset), GST_TIME_ARGS (src->running_time));
+
+  GST_BUFFER_OFFSET (buffer) = src->accum_frames + src->n_frames;
+  src->n_frames++;
+
+  GST_BUFFER_OFFSET_END (buffer) = GST_BUFFER_OFFSET (buffer) + 1;
+  if (src->info.fps_n) {
+    next_time = gst_util_uint64_scale_int (src->n_frames * GST_SECOND,
+        src->info.fps_d, src->info.fps_n);
+    GST_BUFFER_DURATION (buffer) = next_time - src->running_time;
+  } else {
+    next_time = src->timestamp_offset;
+    /* NONE means forever */
+    GST_BUFFER_DURATION (buffer) = GST_CLOCK_TIME_NONE;
+  }
+
+  src->running_time = next_time;
+
+  return GST_FLOW_OK;
 
 not_negotiated:
   {
+    GST_DEBUG_OBJECT (src, "Not negotiated");
     return GST_FLOW_NOT_NEGOTIATED;
   }
 eos:
@@ -327,34 +373,12 @@ eos:
     GST_DEBUG_OBJECT (src, "eos: 0 framerate, frame %d", (gint) src->n_frames);
     return GST_FLOW_EOS;
   }
+invalid_frame:
+  {
+    GST_DEBUG_OBJECT (src, "invalid frame");
+    return GST_FLOW_OK;
+  }
 }
-
-static gboolean
-gst_chromium_embedded_start (GstBaseSrc * basesrc)
-{
-  GstChromiumEmbedded *src = GST_CHROMIUMEMBEDDED (basesrc);
-
-  GST_DEBUG_OBJECT (src, "start");
-
-  /* reset state */
-  src->n_frames = 0;
-  gst_video_info_init (&src->info);
-
-  return TRUE;
-}
-
-static gboolean
-gst_chromium_embedded_stop (GstBaseSrc * basesrc)
-{
-  GstChromiumEmbedded *src = GST_CHROMIUMEMBEDDED (basesrc);
-
-  GST_DEBUG_OBJECT (src, "stop");
-
-  /* release any memory */
-
-  return TRUE;
-}
-
 
 /* entry point to initialize the plug-in
  * initialize the plug-in itself
