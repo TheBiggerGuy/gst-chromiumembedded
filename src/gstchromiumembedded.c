@@ -67,6 +67,8 @@
 GST_DEBUG_CATEGORY_STATIC (gst_chromium_embedded_debug);
 #define GST_CAT_DEFAULT gst_chromium_embedded_debug
 
+#define DEFAULT_IS_LIVE            TRUE
+
 /* Filter signals and args */
 enum
 {
@@ -80,16 +82,14 @@ enum
   PROP_SILENT
 };
 
-/* the capabilities of the inputs and outputs.
- *
- * describe the real formats here.
- */
-/*
+/* the capabilities of the inputs and outputs. */
 #define VTS_VIDEO_CAPS GST_VIDEO_CAPS_MAKE (GST_VIDEO_FORMATS_ALL) ";" \
-  "video/x-raw, format=(string) { gbra }, "        \
+  "video/x-raw, format=(string) { gbra }, "                            \
   "width = " GST_VIDEO_SIZE_RANGE ", "                                 \
   "height = " GST_VIDEO_SIZE_RANGE ", "                                \
   "framerate = " GST_VIDEO_FPS_RANGE
+
+/* Fix sublime syntax " */
 
 static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
@@ -105,12 +105,11 @@ static void gst_chromium_embedded_set_property (GObject * object, guint prop_id,
 static void gst_chromium_embedded_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
-static gboolean gst_chromium_embedded_sink_event (GstPad * pad, GstObject * parent, GstEvent * event);
-static GstFlowReturn gst_chromium_embedded_chain (GstPad * pad, GstObject * parent, GstBuffer * buf);
-
-static GstCaps *gst_chromium_embedded_fixate (GstBaseSrc * parent, GstCaps * caps);
+static GstCaps *gst_chromium_embedded_src_fixate (GstBaseSrc * parent, GstCaps * caps);
 static gboolean gst_chromium_embedded_start (GstBaseSrc * parent);
 static gboolean gst_chromium_embedded_stop (GstBaseSrc * parent);
+
+static GstFlowReturn gst_chromium_embedded_fill (GstPushSrc * psrc, GstBuffer * buffer);
 
 /* GObject vmethod implementations */
 
@@ -147,6 +146,8 @@ gst_chromium_embedded_class_init (GstChromiumEmbeddedClass * klass)
   gstbasesrc_class->fixate = gst_chromium_embedded_src_fixate;
   gstbasesrc_class->start = gst_chromium_embedded_start;
   gstbasesrc_class->start = gst_chromium_embedded_stop;
+
+  gstpushsrc_class->fill = gst_chromium_embedded_fill;
 }
 
 /* initialize the new element
@@ -157,25 +158,12 @@ gst_chromium_embedded_class_init (GstChromiumEmbeddedClass * klass)
 static void
 gst_chromium_embedded_init (GstChromiumEmbedded * src)
 {
-  //filter->sinkpad = gst_pad_new_from_static_template (&sink_factory, "sink");
-  //gst_pad_set_event_function (filter->sinkpad,
-  //                            GST_DEBUG_FUNCPTR(gst_chromium_embedded_sink_event));
-  //gst_pad_set_chain_function (filter->sinkpad,
-  //                            GST_DEBUG_FUNCPTR(gst_chromium_embedded_chain));
-  //GST_PAD_SET_PROXY_CAPS (filter->sinkpad);
-  //gst_element_add_pad (GST_ELEMENT (filter), filter->sinkpad);
-
-  //filter->srcpad = gst_pad_new_from_static_template (&src_factory, "src");
-  //GST_PAD_SET_PROXY_CAPS (filter->srcpad);
-  //gst_element_add_pad (GST_ELEMENT (filter), filter->srcpad);
+  /* custom props */
+  src->silent = FALSE;
 
   /* we operate in time */
   gst_base_src_set_format (GST_BASE_SRC (src), GST_FORMAT_TIME);
   gst_base_src_set_live (GST_BASE_SRC (src), DEFAULT_IS_LIVE);
-  src->timestamp_offset = DEFAULT_TIMESTAMP_OFFSET;
-
-  /* custom props */
-  src->silent = FALSE;
 }
 
 static GstCaps *
@@ -236,7 +224,6 @@ gst_chromium_embedded_parse_caps (const GstCaps * caps,
   const GstStructure *structure;
   GstPadLinkReturn ret;
   const GValue *framerate;
-  const gchar *str;
 
   GST_DEBUG ("parsing caps");
 
@@ -269,11 +256,11 @@ no_framerate:
  * this function does the actual processing
  */
 static GstFlowReturn
-gst_chromium_embedded_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+gst_chromium_embedded_fill (GstPushSrc * psrc, GstBuffer * buffer)
 {
   GstChromiumEmbedded *src;
 
-  src = GST_CHROMIUMEMBEDDED (parent);
+  src = GST_CHROMIUMEMBEDDED (psrc);
 
  if (G_UNLIKELY (GST_VIDEO_INFO_FORMAT (&src->info) ==
           GST_VIDEO_FORMAT_UNKNOWN))
@@ -312,13 +299,15 @@ gst_chromium_embedded_start (GstBaseSrc * basesrc)
 
   GST_DEBUG_OBJECT (src, "start");
 
-  gst_chromium_embedded_init (&src->info);
+  src->n_frames = 0;
+
+  gst_video_info_init (&src->info);
 
   return TRUE;
 }
 
 static gboolean
-gst_chromium_embedded_src_stop (GstBaseSrc * basesrc)
+gst_chromium_embedded_stop (GstBaseSrc * basesrc)
 {
   GstChromiumEmbedded *src = GST_CHROMIUMEMBEDDED (basesrc);
 

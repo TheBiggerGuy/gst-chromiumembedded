@@ -48,6 +48,11 @@
 
 #include <gst/gst.h>
 
+#include <gst/base/gstpushsrc.h>
+
+#include <gst/video/gstvideometa.h>
+#include <gst/video/video.h>
+
 G_BEGIN_DECLS
 
 /* #defines don't like whitespacey bits */
@@ -67,16 +72,21 @@ typedef struct _GstChromiumEmbeddedClass GstChromiumEmbeddedClass;
 
 struct _GstChromiumEmbedded
 {
-  GstElement element;
+  GstPushSrc element;
 
-  GstPad *sinkpad, *srcpad;
+  /*< private >*/
 
+  /* verbose logging */
   gboolean silent;
+  /* video state */
+  GstVideoInfo info;
+  /* total frames sent */
+  gint64 n_frames;
 };
 
 struct _GstChromiumEmbeddedClass 
 {
-  GstElementClass parent_class;
+  GstPushSrcClass parent_class;
 };
 
 GType gst_chromium_embedded_get_type (void);
