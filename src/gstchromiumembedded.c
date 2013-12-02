@@ -60,8 +60,6 @@
 #  include <config.h>
 #endif
 
-#include <gst/gst.h>
-
 #include "gstchromiumembedded.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_chromium_embedded_debug);
@@ -84,7 +82,7 @@ enum
 
 /* the capabilities of the inputs and outputs. */
 #define VTS_VIDEO_CAPS GST_VIDEO_CAPS_MAKE (GST_VIDEO_FORMATS_ALL) ";" \
-  "video/x-raw, format=(string) { gbra }, "                            \
+  "video/x-raw, format=(string) { bgra }, "                            \
   "width = " GST_VIDEO_SIZE_RANGE ", "                                 \
   "height = " GST_VIDEO_SIZE_RANGE ", "                                \
   "framerate = " GST_VIDEO_FPS_RANGE
@@ -105,6 +103,7 @@ static void gst_chromium_embedded_set_property (GObject * object, guint prop_id,
 static void gst_chromium_embedded_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
+static gboolean gst_chromium_embedded_setcaps (GstBaseSrc * bsrc, GstCaps * caps);
 static GstCaps *gst_chromium_embedded_src_fixate (GstBaseSrc * parent, GstCaps * caps);
 static gboolean gst_chromium_embedded_start (GstBaseSrc * parent);
 static gboolean gst_chromium_embedded_stop (GstBaseSrc * parent);
@@ -113,7 +112,12 @@ static GstFlowReturn gst_chromium_embedded_fill (GstPushSrc * psrc, GstBuffer * 
 
 /* GObject vmethod implementations */
 
-/* initialize the chromiumembedded's class */
+/* 
+ * initialize the chromiumembedded's class
+ * Initialise the class only once
+ *   (specifying what signals, arguments and virtual
+ *    functions the class has and setting up global state)
+ */
 static void
 gst_chromium_embedded_class_init (GstChromiumEmbeddedClass * klass)
 {
@@ -143,6 +147,7 @@ gst_chromium_embedded_class_init (GstChromiumEmbeddedClass * klass)
   gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&src_factory));
 
+  gstbasesrc_class->set_caps = gst_chromium_embedded_setcaps;
   gstbasesrc_class->fixate = gst_chromium_embedded_src_fixate;
   gstbasesrc_class->start = gst_chromium_embedded_start;
   gstbasesrc_class->start = gst_chromium_embedded_stop;
@@ -154,6 +159,8 @@ gst_chromium_embedded_class_init (GstChromiumEmbeddedClass * klass)
  * instantiate pads and add them to element
  * set pad calback functions
  * initialize instance structure
+ *
+ * initialise a specific instance of this type
  */
 static void
 gst_chromium_embedded_init (GstChromiumEmbedded * src)
@@ -249,8 +256,38 @@ no_framerate:
   }
 }
 
-/* GstElement vmethod implementations */
+static gboolean
+gst_chromium_embedded_setcaps (GstBaseSrc * bsrc, GstCaps * caps)
+{
+  //const GstStructure *structure;
+  GstChromiumEmbedded *src;
+  GstVideoInfo info;
 
+  src = GST_CHROMIUMEMBEDDED (bsrc);
+
+  //structure = gst_caps_get_structure (caps, 0);
+
+  /* we can use the parsing code */
+  if (!gst_video_info_from_caps (&info, caps))
+    goto parse_failed;
+
+  /* looks ok here */
+  src->info = info;
+
+  GST_DEBUG_OBJECT (src, "size %dx%d, %d/%d fps",
+      info.width, info.height, info.fps_n, info.fps_d);
+
+  src->n_frames = 0;
+
+  return TRUE;
+
+  /* ERRORS */
+parse_failed:
+  {
+    GST_DEBUG_OBJECT (bsrc, "failed to parse caps");
+    return FALSE;
+  }
+}
 
 /* chain function
  * this function does the actual processing
@@ -299,8 +336,8 @@ gst_chromium_embedded_start (GstBaseSrc * basesrc)
 
   GST_DEBUG_OBJECT (src, "start");
 
+  /* reset state */
   src->n_frames = 0;
-
   gst_video_info_init (&src->info);
 
   return TRUE;
@@ -312,6 +349,8 @@ gst_chromium_embedded_stop (GstBaseSrc * basesrc)
   GstChromiumEmbedded *src = GST_CHROMIUMEMBEDDED (basesrc);
 
   GST_DEBUG_OBJECT (src, "stop");
+
+  /* release any memory */
 
   return TRUE;
 }

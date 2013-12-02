@@ -1,0 +1,2 @@
+ffmpeg -i big_buck_bunny.mp4 -vcodec rawvideo -pix_fmt bgra -vf scale=320:240 -f rawvideo big_buck_bunny.bgra_320x240.raw
+
