@@ -19,6 +19,7 @@ AM_MAINTAINER_MODE([enable])
 
 dnl check for tools (compiler etc.)
 AC_PROG_CC
+AC_PROG_CXX
 
 dnl required version of libtool
 LT_PREREQ([2.2.6])
@@ -42,7 +43,7 @@ dnl for libgstinterfaces-1.0: gstreamer-interfaces-1.0 >= $GST_REQUIRED
 dnl for libgstrtp-1.0: gstreamer-rtp-1.0 >= $GST_REQUIRED
 dnl for libgstrtsp-1.0: gstreamer-rtsp-1.0 >= $GST_REQUIRED
 dnl etc.
-PKG_CHECK_MODULES(GST, [
+PKG_CHECK_MODULES([GST], [
   gstreamer-1.0 >= $GST_REQUIRED
   gstreamer-base-1.0 >= $GST_REQUIRED
   gstreamer-controller-1.0 >= $GST_REQUIRED
@@ -60,6 +61,17 @@ PKG_CHECK_MODULES(GST, [
   ])
 ])
 
+PKG_CHECK_MODULES([GTK], [gtk+-2.0])
+AC_SUBST(GTK_CFLAGS)
+AC_SUBST(GTK_CPPFLAGS)
+AC_SUBST(GTK_LIBS)
+dnl PKG_CHECK_MODULES([GLIB], [glib-2.0])
+dnl AC_SUBST(GLIB_CFLAGS)
+dnl AC_SUBST(GLIB_LIBS)
+dnl PKG_CHECK_MODULES([GTHREADS], [gthread-2.0])
+dnl AC_SUBST(GTHREADS_CFLAGS)
+dnl AC_SUBST(GTHREADS_LIBS)
+
 dnl check if compiler understands -Wall (if yes, add -Wall to GST_CFLAGS)
 AC_MSG_CHECKING([to see if compiler understands -Wall])
 save_CFLAGS="$CFLAGS"
@@ -70,6 +82,8 @@ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([ ], [ ])], [
 ], [
   AC_MSG_RESULT([no])
 ])
+
+CXXFLAGS="$CXXFLAGS -std=c++0x"
 
 dnl set the plugindir where plugins should be installed (for src/Makefile.am)
 if test "x${prefix}" = "x$HOME"; then

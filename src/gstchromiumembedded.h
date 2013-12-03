@@ -55,6 +55,8 @@
 #include <gst/video/gstvideometa.h>
 #include <gst/video/video.h>
 
+#include "cefFrameBuffer.h" 
+
 G_BEGIN_DECLS
 
 /* #defines don't like whitespacey bits */
@@ -80,6 +82,10 @@ struct _GstChromiumEmbedded
 
   /* verbose logging */
   gboolean verbose;
+
+  cef_frame_buffer_t *cef_frame_buffer;
+
+  const char *url;
 
   /* video state */
   GstVideoInfo info;
