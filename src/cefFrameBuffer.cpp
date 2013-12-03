@@ -2,8 +2,7 @@
 #include "cefFrameBuffer.h"
 
 #include <iostream>     // std::cout
-#include <new>
-#include <typeinfo>
+#include <string>
 
 #include <include/cef_app.h>
 #include <include/cef_client.h>
@@ -12,69 +11,67 @@
 
 class CefSimpleRenderHandler : public CefRenderHandler
 {
-
+private:
   int width;
   int height;
+  uint8_t *frame_buffer;
 
 public:
-  CefSimpleRenderHandler(int width, int height) {
+  CefSimpleRenderHandler(int width, int height, uint8_t *frame_buffer) {
     this->width = width;
     this->height = height;
+    this->frame_buffer = frame_buffer;
   }
 
-public:
   bool GetViewRect(CefRefPtr<CefBrowser> browser, CefRect &rect) {
     rect = CefRect(0, 0, width, height);
     return true;
   }
 
-public:
   void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType paintType, const RectList &rects, 
                const void *buffer, int width, int height) {
+    memcpy(frame_buffer, buffer, width * height * 4 * 1);
   }
 
-public:
   IMPLEMENT_REFCOUNTING(CefSimpleRenderHandler);
 };
 
 class CefSimpleClient : public CefClient {
-
+private:
   CefRefPtr<CefRenderHandler> renderHandler;
 
 public:
   CefSimpleClient(CefRenderHandler* simpleRenderHandler) {
-    renderHandler = simpleRenderHandler;
+    this->renderHandler = simpleRenderHandler;
   }
 
-public:
   ~CefSimpleClient() { }
 
-public:
   CefRefPtr<CefRenderHandler> GetRenderHandler() {
     return renderHandler;
   }
 
-public:
   IMPLEMENT_REFCOUNTING(CefSimpleClient);
 };
 
 
 class CefFrameBuffer : public cef_frame_buffer_t {
-
+private:
   CefSimpleRenderHandler* simpleRenderHandler;
+  uint8_t *frame_buffer;
 
 public:
   CefFrameBuffer(const char *url, uint16_t width, uint16_t height) {
     std::cout << "constructed [" << this << "]\n";
 
-    simpleRenderHandler = new CefSimpleRenderHandler(width, height);
+    this->simpleRenderHandler = new CefSimpleRenderHandler(width, height, frame_buffer);
 
     CefSettings settings;
-    const CefMainArgs cefMainArgs = const_cast<CefMainArgs> (new CefMainArgs());
-    CefInitialize(cefMainArgs, settings, nullptr);
+    const CefMainArgs* cefMainArgs = new CefMainArgs(0, nullptr);
+    CefInitialize(*cefMainArgs, settings, nullptr);
+    delete cefMainArgs;
 
-    CefRefPtr<CefClient> client = new CefSimpleClient(
-      dynamic_cast<CefRenderHandler*>(&simpleRenderHandler));
+    CefRefPtr<CefClient> client(new CefSimpleClient(simpleRenderHandler));
 
     CefBrowserSettings browserSettings;
     CefWindowInfo windowInfo;
@@ -82,17 +79,18 @@ public:
 
     CefRefPtr<CefBrowser> browser;
     browser = CefBrowserHost::CreateBrowserSync(windowInfo, client.get(),
-                                                url, browserSettings, nullptr);
-  };
+                                                url, browserSettings);
+  }
   
   ~CefFrameBuffer() {
     CefShutdown();
     delete simpleRenderHandler;
-  };
+  }
 
   void nextFrame(uint8_t *buffer) {
     CefRunMessageLoop();
-  };
+    buffer = frame_buffer;
+  }
 };
 
 inline CefFrameBuffer* real(cef_frame_buffer_t* cef_frame_buffer) { return static_cast<CefFrameBuffer*>(cef_frame_buffer); }

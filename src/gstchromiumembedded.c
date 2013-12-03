@@ -255,13 +255,13 @@ gst_chromium_embedded_setcaps (GstBaseSrc * bsrc, GstCaps * caps)
     fclose(src->fp);
     src->fp = NULL;
   }
-  src->fp = fopen("/home/guy/Code/git/video-test/video/big_buck_bunny.bgra_320x240_25fps.raw", "rb");
+  src->fp = fopen("/home/guytay/Videos/big_buck_bunny.bgra_320x240_25fps.raw", "rb");
 
   if (src->cef_frame_buffer != NULL) {
     cef_frame_buffer_deinit(src->cef_frame_buffer);
     src->cef_frame_buffer = NULL;
   }
-  src->cef_frame_buffer = cef_frame_buffer_init(src->url, info.width, info.height);
+  //src->cef_frame_buffer = cef_frame_buffer_init(src->url, info.width, info.height);
   
 
   return TRUE;
@@ -338,6 +338,9 @@ gst_chromium_embedded_fill (GstPushSrc * psrc, GstBuffer * buffer)
 
   // TODO: Keep the same buffer, only remalloc on size change
   buf = g_malloc(w * h * n * d);
+
+  //cef_frame_buffer_get_next_frame(src->cef_frame_buffer, buf);
+
   if (fread(buf, 1, w * h * n * d, src->fp) != w * h * n * d)
     goto error;
   pack_func(info->finfo, GST_VIDEO_PACK_FLAG_NONE,
